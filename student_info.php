@@ -369,6 +369,69 @@ if (!$student) {
     exit;
 }
 
+// Default values from current class (ACTIVE students)
+$departmentName = $student['department_name'] ?? '';
+$courseName = $student['class_name'] ?? '';
+
+// ===== HANDLE GRADUATED STUDENT DISPLAY DATA =====
+$is_graduated = ($student['status'] === 'Graduated');
+
+// Batch (from admission_date)
+$admissionYear = $student['admission_date']
+    ? date('Y', strtotime($student['admission_date']))
+    : '';
+
+$graduationYear = $admissionYear ? $admissionYear + 2 : '';
+
+// Defaults from active class
+$courseName = $student['class_name'] ?? '';
+$departmentName = $student['department_name'] ?? '';
+
+if ($is_graduated && $admissionYear) {
+
+    // Try alumni_profiles first (BEST)
+    $stmt = $conn->prepare("
+        SELECT ap.course, d.department_name
+        FROM alumni_profiles ap
+        LEFT JOIN classes c ON c.class_name = ap.course
+        LEFT JOIN departments d ON d.id = c.department_id
+        WHERE ap.student_id = ?
+        LIMIT 1
+    ");
+    $stmt->bind_param("i", $student['id']);
+    $stmt->execute();
+    $alumni = $stmt->get_result()->fetch_assoc();
+
+    if ($alumni) {
+        $courseName = $alumni['course'];
+        $departmentName = $alumni['department_name'];
+    }
+
+    // Fallback: derive from academic year
+    if (!$courseName) {
+        $stmt = $conn->prepare("
+            SELECT c.class_name, d.department_name
+            FROM classes c
+            LEFT JOIN departments d ON d.id = c.department_id
+            WHERE c.academic_year LIKE CONCAT(?, '%')
+            ORDER BY c.id DESC
+            LIMIT 1
+        ");
+        $stmt->bind_param("s", $admissionYear);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+
+        if ($row) {
+            $courseName = $row['class_name'];
+            $departmentName = $row['department_name'];
+        }
+    }
+}
+
+// Final honest fallback
+$courseName = $courseName ?: 'Unknown Course';
+$departmentName = $departmentName ?: 'Unknown Department';
+
 // Helper for profile picture
 function getProfilePictureUrl($filename) {
     if (!$filename || $filename == "null" || $filename == "undefined") {
@@ -414,8 +477,10 @@ $can_edit_student = has_any_role(['HOD','Admin']);
         <!-- Profile Picture -->
         <div class="col-12 col-md-3 text-center">
           <img src="<?php echo getProfilePictureUrl($student['profile_picture']); ?>"
-               class="student-profile-pic img-fluid rounded-circle mb-3 shadow-sm"
-               alt="Profile Picture" style="width:180px; height:180px; object-fit:cover;">
+     class="student-profile-pic img-fluid mb-3 shadow-sm"
+     alt="Profile Picture"
+     style="width:140px; height:160px; object-fit:cover; border-radius:0;">
+
 
           <h4 class="mb-1"><?php echo htmlspecialchars($student['first_name'] . " " . $student['last_name']); ?></h4>
           <p class="text-muted"><?php echo htmlspecialchars($student['student_id']); ?></p>
@@ -436,8 +501,22 @@ $can_edit_student = has_any_role(['HOD','Admin']);
                 <tr><th>Date of Birth</th><td><?= $student['date_of_birth'] ? date('M d, Y', strtotime($student['date_of_birth'])) : 'Not provided'; ?></td></tr>
                 <tr><th>Gender</th><td><?= htmlspecialchars($student['gender']); ?></td></tr>
                 <tr><th>Address</th><td><?= nl2br(htmlspecialchars($student['address'])); ?></td></tr>
-                <tr><th>Class</th><td><?= htmlspecialchars((string)$student['class_name'] . " " . (string)$student['section']); ?></td></tr>
-                <tr><th>Department</th><td><?= htmlspecialchars($student['department_name']); ?></td></tr>
+<tr>
+  <th>Class</th>
+  <td>
+    <?php if ($is_graduated): ?>
+        <?= htmlspecialchars($courseName . " ({$admissionYear} - {$graduationYear})") ?>
+    <?php else: ?>
+        <?= htmlspecialchars($student['class_name'] . ' ' . $student['section']) ?>
+    <?php endif; ?>
+  </td>
+</tr>
+
+<tr>
+  <th>Department</th>
+  <td><?= htmlspecialchars($departmentName) ?></td>
+</tr>
+
                 <tr><th>Admission Date</th><td><?= $student['admission_date'] ? date('M d, Y', strtotime($student['admission_date'])) : 'Not provided'; ?></td></tr>
                 <tr><th>Parent Name</th><td><?= htmlspecialchars($student['parent_name']); ?></td></tr>
                 <tr><th>Parent Phone</th><td><?= htmlspecialchars($student['parent_phone']); ?></td></tr>
@@ -505,18 +584,31 @@ $can_edit_student = has_any_role(['HOD','Admin']);
             <div class="card-body text-center">
               <h5 class="fw-bold mb-3 text-primary"><i class="fas fa-bolt me-2"></i>Quick Actions</h5>
               <div class="d-grid gap-2">
-                <?php if($can_edit_student): ?>
-                  <button class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editStudentModal">
-                    <i class="fas fa-edit me-1"></i> Edit Student
-                  </button>
-                <?php endif; ?>
-                <a class="btn btn-outline-secondary" href="disciplinary.php">
-                  <i class="fas fa-list me-1"></i> Manage All DA
-                </a>
-                <button class="btn btn-secondary" onclick="history.back()">
-                  <i class="fas fa-arrow-left me-1"></i> Back
-                </button>
-              </div>
+<div class="d-grid gap-2">
+
+    <!-- ✅ NEW PRINT BUTTON -->
+    <a class="btn btn-success" 
+       href="student_profile_print.php?id=<?php echo $student['id']; ?>" 
+       target="_blank">
+        <i class="fas fa-print me-1"></i> Print Profile
+    </a>
+
+    <?php if($can_edit_student): ?>
+      <button class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editStudentModal">
+        <i class="fas fa-edit me-1"></i> Edit Student
+      </button>
+    <?php endif; ?>
+
+    <a class="btn btn-outline-secondary" href="disciplinary.php">
+      <i class="fas fa-list me-1"></i> Manage All DA
+    </a>
+
+    <button class="btn btn-secondary" onclick="history.back()">
+      <i class="fas fa-arrow-left me-1"></i> Back
+    </button>
+
+</div>
+
             </div>
           </div>
         </div>
@@ -762,7 +854,7 @@ document.addEventListener('DOMContentLoaded', function() {
               <select class="form-select" name="status">
                 <option value="Active" <?php echo $student['status']=='Active' ? 'selected' : ''; ?>>Active</option>
                 <option value="Inactive" <?php echo $student['status']=='Inactive' ? 'selected' : ''; ?>>Inactive</option>
-                <option value="Alumni" <?php echo $student['status']=='Alumni' ? 'selected' : ''; ?>>Alumni</option>
+                <option value="Graduated" <?php echo $student['status']=='Graduated' ? 'selected' : ''; ?>>Alumni</option>
               </select>
             </div>
           </div>

@@ -118,3 +118,33 @@
         </div>
     </div>
 </div>
+
+<!-- JavaScript to block typing in Class Name fields -->
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const allowed = "asdf;lkj";
+
+    function enforce(inputId) {
+        const input = document.getElementById(inputId);
+        if (!input) return;
+
+        // Block disallowed keys
+        input.addEventListener("keydown", function (e) {
+            const controlKeys = ["Backspace","Delete","Tab","ArrowLeft","ArrowRight","Home","End"];
+            if (controlKeys.includes(e.key)) return; // allow navigation & edit
+            if (!allowed.includes(e.key.toLowerCase())) e.preventDefault();
+        });
+
+        // Filter pasted text
+        input.addEventListener("paste", function(e) {
+            e.preventDefault();
+            const paste = (e.clipboardData || window.clipboardData).getData('text');
+            const filtered = paste.split('').filter(c => allowed.includes(c.toLowerCase())).join('');
+            input.value += filtered;
+        });
+    }
+
+    enforce("class_name");      // Add Class modal
+    enforce("edit_class_name"); // Edit Class modal
+});
+</script>

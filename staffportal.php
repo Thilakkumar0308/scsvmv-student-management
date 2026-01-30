@@ -11,42 +11,47 @@ require_once 'config/db.php';
 require_once 'includes/functions.php';
 require_login();
 
-// Only allow teachers
+// Allow only Teacher
 if (!has_role('Teacher')) {
     redirect('dashboard.php');
 }
 
 $teacher_id = $_SESSION['user_id'] ?? null;
+$teacher_name = $_SESSION['full_name'] ?? 'Teacher';
 
-// Stats container
+// ===========================
+// 1️⃣ Stats Initialization
+// ===========================
 $stats = [
-    'total_students'      => 0,
-    'total_classes'       => 0,
-    'active_disciplinary' => 0,
+    'total_students' => 0,
+    'total_classes' => 0,
+    'active_disciplinary' => 0
 ];
 
-// 1) Get classes assigned to this teacher (so we can show only those classes and link to their student lists)
+// ===========================
+// 2️⃣ Fetch Teacher’s Classes
+// ===========================
 $teacher_classes = [];
 $stmt = $conn->prepare("
     SELECT c.id, c.class_name, c.section, COUNT(s.id) AS student_count
     FROM classes c
     LEFT JOIN students s ON s.class_id = c.id
-    JOIN teacher_classes tc ON c.id = tc.class_id
+    INNER JOIN teacher_classes tc ON c.id = tc.class_id
     WHERE tc.teacher_id = ?
     GROUP BY c.id
     ORDER BY c.class_name, c.section
 ");
-if ($stmt) {
-    $stmt->bind_param("i", $teacher_id);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    while ($row = $result->fetch_assoc()) {
-        $teacher_classes[] = $row;
-    }
-    $stmt->close();
+$stmt->bind_param("i", $teacher_id);
+$stmt->execute();
+$result = $stmt->get_result();
+while ($row = $result->fetch_assoc()) {
+    $teacher_classes[] = $row;
 }
+$stmt->close();
 
-// 2) Total students in assigned classes
+// ===========================
+// 3️⃣ Total Students
+// ===========================
 $stmt = $conn->prepare("
     SELECT COUNT(DISTINCT s.id) AS total
     FROM students s
@@ -54,35 +59,30 @@ $stmt = $conn->prepare("
     JOIN teacher_classes tc ON c.id = tc.class_id
     WHERE tc.teacher_id = ?
 ");
-if ($stmt) {
-    $stmt->bind_param("i", $teacher_id);
-    $stmt->execute();
-    $res = $stmt->get_result();
-    $stats['total_students'] = $res->fetch_assoc()['total'] ?? 0;
-    $stmt->close();
-}
+$stmt->bind_param("i", $teacher_id);
+$stmt->execute();
+$stats['total_students'] = $stmt->get_result()->fetch_assoc()['total'] ?? 0;
+$stmt->close();
 
-// 3) Total classes assigned
-$stats['total_classes'] = count($teacher_classes);
-
-// 4) Active disciplinary actions for this teacher's classes
+// ===========================
+// 4️⃣ Active Disciplinary Actions
+// ===========================
 $stmt = $conn->prepare("
-    SELECT COUNT(*) AS total_da
+    SELECT COUNT(*) AS total
     FROM disciplinary_actions da
     JOIN students s ON da.student_id = s.id
     JOIN classes c ON s.class_id = c.id
     JOIN teacher_classes tc ON c.id = tc.class_id
     WHERE tc.teacher_id = ? AND da.status = 'Active'
 ");
-if ($stmt) {
-    $stmt->bind_param("i", $teacher_id);
-    $stmt->execute();
-    $res = $stmt->get_result();
-    $stats['active_disciplinary'] = $res->fetch_assoc()['total_da'] ?? 0;
-    $stmt->close();
-}
+$stmt->bind_param("i", $teacher_id);
+$stmt->execute();
+$stats['active_disciplinary'] = $stmt->get_result()->fetch_assoc()['total'] ?? 0;
+$stmt->close();
 
-// 5) Recent disciplinary actions (limit 5) for teacher's classes
+// ===========================
+// 5️⃣ Recent Disciplinary Actions
+// ===========================
 $recent_disciplinary = [];
 $stmt = $conn->prepare("
     SELECT da.*, s.first_name, s.last_name, s.student_id, c.class_name, c.section
@@ -94,96 +94,70 @@ $stmt = $conn->prepare("
     ORDER BY da.created_at DESC
     LIMIT 5
 ");
-if ($stmt) {
-    $stmt->bind_param("i", $teacher_id);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    while ($row = $result->fetch_assoc()) {
-        $recent_disciplinary[] = $row;
-    }
-    $stmt->close();
+$stmt->bind_param("i", $teacher_id);
+$stmt->execute();
+$result = $stmt->get_result();
+while ($row = $result->fetch_assoc()) {
+    $recent_disciplinary[] = $row;
 }
+$stmt->close();
 
 include 'includes/header.php';
 ?>
 
 <div class="container-fluid mt-3">
+
     <!-- Welcome -->
     <div class="text-center mb-4">
         <h2 class="text-white fw-bold fs-5">
-            <i class="fas fa-chalkboard-teacher me-2 text-warning"></i>
-            Welcome, <?= htmlspecialchars($_SESSION['full_name'] ?? 'Teacher') ?>!
+            <i class="fas fa-user-tie me-2 text-warning"></i>
+            Welcome, <?= htmlspecialchars($teacher_name) ?>!
         </h2>
-        <p class="text-white-50 fs-7">Here’s a summary of your class activities. Click a class to view only students in that class.</p>
+        <p class="text-white-50 fs-7">Here’s a summary of your classes and student activities.</p>
     </div>
 
     <!-- Stats Cards -->
     <div class="row g-3 mb-4">
-        <?php
-        // Students card: link to a filtered students page. We prefer linking to students.php?teacher_id=...,
-        // but better UX is to direct to the specific class if the teacher has exactly one class.
-        $students_link = 'students.php?teacher_id=' . urlencode($teacher_id);
-        if (count($teacher_classes) === 1) {
-            // If only one class assigned, link directly to that class's student list
-            $students_link = 'students.php?class_id=' . urlencode($teacher_classes[0]['id']);
-        }
+        <?php 
         $cards = [
-            [
-                'title' => 'Students',
-                'icon'  => 'fas fa-users',
-                'value' => $stats['total_students'],
-                'color' => 'primary',
-                'link'  => $students_link
-            ],
-            [
-                'title' => 'Your Classes',
-                'icon'  => 'fas fa-chalkboard-teacher',
-                'value' => $stats['total_classes'],
-                'color' => 'warning',
-                'link'  => 'class_management.php'
-            ],
-            [
-                'title' => 'Active Disciplinary',
-                'icon'  => 'fas fa-exclamation-triangle',
-                'value' => $stats['active_disciplinary'],
-                'color' => 'danger',
-                'link'  => 'disciplinary.php'
-            ],
+            ['title'=>'Students', 'icon'=>'fas fa-users', 'value'=>$stats['total_students'], 'color'=>'primary', 'link'=>'students.php?teacher_id=' . urlencode($teacher_id)],
+            ['title'=>'Your Classes', 'icon'=>'fas fa-chalkboard-teacher', 'value'=>count($teacher_classes), 'color'=>'warning', 'link'=>'class_management.php'],
+            ['title'=>'Active Disciplinary', 'icon'=>'fas fa-exclamation-triangle', 'value'=>$stats['active_disciplinary'], 'color'=>'danger', 'link'=>'disciplinary.php']
         ];
-
-        foreach ($cards as $card): ?>
-            <div class="col-6 col-sm-6 col-md-3">
-                <a href="<?= htmlspecialchars($card['link']) ?>" class="text-decoration-none">
-                    <div class="card stat-card border-0 text-center shadow-sm h-100">
-                        <div class="card-body py-4">
-                            <div class="icon-circle bg-<?= htmlspecialchars($card['color']) ?> bg-opacity-10 mb-3">
-                                <i class="<?= htmlspecialchars($card['icon']) ?> text-<?= htmlspecialchars($card['color']) ?> fa-2x"></i>
-                            </div>
-                            <h6 class="fw-semibold text-secondary mb-1"><?= htmlspecialchars($card['title']) ?></h6>
-                            <h3 class="fw-bold text-dark mb-0"><?= htmlspecialchars($card['value']) ?></h3>
+        foreach($cards as $card): ?>
+        <div class="col-6 col-sm-6 col-md-3">
+            <a href="<?= $card['link'] ?>" class="text-decoration-none">
+                <div class="card stat-card border-0 text-center shadow-sm h-100">
+                    <div class="card-body py-4">
+                        <div class="icon-circle bg-<?= $card['color'] ?> bg-opacity-10 mb-3">
+                            <i class="<?= $card['icon'] ?> text-<?= $card['color'] ?> fa-2x"></i>
                         </div>
+                        <h6 class="fw-semibold text-secondary mb-1"><?= $card['title'] ?></h6>
+                        <h3 class="fw-bold text-dark mb-0"><?= $card['value'] ?></h3>
                     </div>
-                </a>
-            </div>
+                </div>
+            </a>
+        </div>
         <?php endforeach; ?>
     </div>
 
     <div class="row g-3">
-        <!-- Teacher's Classes (explicit list so teacher can click the exact class e.g., "MCA II") -->
+
+        <!-- Teacher's Classes -->
         <div class="col-12 col-lg-4">
             <div class="card shadow-sm border-0 h-100">
                 <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                    <h6 class="mb-0"><i class="fas fa-chalkboard-teacher me-2"></i>Your Classes</h6>
+                    <h6 class="mb-0"><i class="fas fa-chalkboard me-2"></i>Your Classes</h6>
                     <a href="class_management.php" class="btn btn-sm btn-light">View All</a>
                 </div>
                 <div class="card-body p-2">
-                    <?php if (empty($teacher_classes)): ?>
-                        <p class="text-muted small m-0">No classes assigned to you.</p>
+                    <?php if(empty($teacher_classes)): ?>
+                        <p class="text-muted small m-0">No classes assigned.</p>
                     <?php else: ?>
                         <div class="list-group">
-                            <?php foreach ($teacher_classes as $class): ?>
-                                <a href="students.php?class_id=<?= urlencode($class['id']) ?>"
-                                   class="list-group-item list-group-item-action border-0 mb-2 shadow-sm rounded hover-glow flex-column flex-sm-row">
+                            <?php foreach($teacher_classes as $class): ?>
+                                <a href="students.php?class_id=<?= urlencode($class['id']) ?>"  
+                                   class="list-group-item list-group-item-action border-0 mb-2 shadow-sm rounded hover-list flex-column flex-sm-row">
                                     <div class="d-flex justify-content-between align-items-center">
                                         <div>
                                             <strong class="d-block"><?= htmlspecialchars($class['class_name']) ?></strong>
@@ -209,24 +183,21 @@ include 'includes/header.php';
                     <a href="disciplinary.php" class="btn btn-sm btn-light">View All</a>
                 </div>
                 <div class="card-body p-2">
-                    <?php if (empty($recent_disciplinary)): ?>
-                        <p class="text-muted small m-0">No disciplinary actions.</p>
+                    <?php if(empty($recent_disciplinary)): ?>
+                        <p class="text-muted small m-0">No disciplinary actions found.</p>
                     <?php else: ?>
                         <div class="list-group">
-                            <?php foreach ($recent_disciplinary as $disc): ?>
-                                <a href="student_da_record.php?student_id=<?= urlencode($disc['student_id']) ?>"
-                                   class="list-group-item list-group-item-action border-0 mb-2 shadow-sm rounded hover-glow flex-column flex-sm-row">
+                            <?php foreach($recent_disciplinary as $disc): ?>
+                                <a href="student_da_record.php?student_id=<?= urlencode($disc['student_id']) ?>" 
+                                   class="list-group-item list-group-item-action border-0 mb-2 shadow-sm rounded hover-list flex-column flex-sm-row">
                                     <div class="d-flex justify-content-between align-items-center">
                                         <div>
-                                            <strong class="d-block"><?= htmlspecialchars($disc['first_name'] . ' ' . $disc['last_name']) ?></strong>
-                                            <span class="text-muted small d-block">
-                                                <b>Class:</b> <?= htmlspecialchars($disc['class_name'] . ' ' . $disc['section']) ?>
-                                            </span>
-                                            <span class="text-muted small d-block">
-                                                <b>Reason:</b> <?= htmlspecialchars($disc['description'] ?: 'No reason provided') ?>
-                                            </span>
+                                            <strong class="d-block"><?= htmlspecialchars($disc['first_name'].' '.$disc['last_name']) ?></strong>
+                                            <span class="text-muted small d-block"><b>Class :</b> <?= htmlspecialchars($disc['class_name'].' '.$disc['section']) ?></span>
+                                            <span class="text-muted small d-block"><b>DA Reason :</b> <?= htmlspecialchars($disc['da_reason'] ?: 'No reason provided') ?></span>
+                                            <span class="text-muted small d-block"><b>Resolved :</b> <?= htmlspecialchars($disc['resolved_reason'] ?: 'Not resolved') ?></span>
                                         </div>
-                                        <span class="badge bg-<?= ($disc['status'] === 'Active') ? 'danger' : 'secondary' ?> mt-1 mt-sm-0">
+                                        <span class="badge bg-<?= $disc['status']=='Active'?'danger':'secondary' ?> mt-1 mt-sm-0">
                                             <?= htmlspecialchars($disc['status']) ?>
                                         </span>
                                     </div>
@@ -238,18 +209,48 @@ include 'includes/header.php';
             </div>
         </div>
 
-        <!-- Overview / Placeholder -->
+        <!-- Overview -->
         <div class="col-12 col-lg-4">
             <div class="card shadow-sm border-0 h-100">
-                <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+                <div class="card-header bg-secondary text-white">
                     <h6 class="mb-0"><i class="fas fa-info-circle me-2"></i>Overview</h6>
-                    <a href="#" class="btn btn-sm btn-light invisible">View</a>
                 </div>
                 <div class="card-body p-3">
-                    <p class="small text-muted m-0">Use this area to show teacher-specific stats (e.g., messages, schedules, or recent submissions).</p>
+
+                    <!-- Today’s Schedule -->
+                    <h6 class="fw-semibold text-primary mb-2"><i class="fas fa-calendar-day me-2"></i>Today's Classes</h6>
+                    <?php if(empty($today_classes)): ?>
+                        <p class="text-muted small">No classes scheduled today.</p>
+                    <?php else: ?>
+                        <ul class="list-group list-group-flush mb-3">
+                        <?php foreach($today_classes as $cls): ?>
+                            <li class="list-group-item small">
+                                <b><?= htmlspecialchars($cls['class_name'].' '.$cls['section']) ?></b> – <?= htmlspecialchars($cls['subject_name']) ?><br>
+                                <span class="text-muted"><?= date('h:i A', strtotime($cls['start_time'])) ?> - <?= date('h:i A', strtotime($cls['end_time'])) ?></span>
+                            </li>
+                        <?php endforeach; ?>
+                        </ul>
+                    <?php endif; ?>
+
+                    <!-- Announcements -->
+                    <h6 class="fw-semibold text-warning mb-2"><i class="fas fa-bullhorn me-2"></i>Announcements</h6>
+                    <?php if(empty($announcements)): ?>
+                        <p class="text-muted small">No new announcements.</p>
+                    <?php else: ?>
+                        <ul class="list-group list-group-flush mb-3">
+                        <?php foreach($announcements as $a): ?>
+                            <li class="list-group-item small">
+                                <b><?= htmlspecialchars($a['title']) ?></b><br>
+                                <span class="text-muted"><?= htmlspecialchars($a['message']) ?></span><br>
+                                <small class="text-muted"><?= date('M d, Y', strtotime($a['created_at'])) ?></small>
+                            </li>
+                        <?php endforeach; ?>
+                        </ul>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
+
     </div>
 </div>
 
@@ -278,26 +279,24 @@ include 'includes/header.php';
     transition: all 0.3s ease;
 }
 .stat-card:hover .icon-circle {
-    transform: scale(1.05);
+    transform: scale(1.1);
 }
 
-/* Hover list for list-group items */
-.hover-glow {
-    transition: transform 0.25s, box-shadow 0.25s, background-color 0.25s;
-    background-color: #fff;
+/* Hover List */
+.hover-list {
+    transition: 0.3s ease;
 }
-.hover-glow:hover {
-    transform: translateY(-4px);
-    cursor: pointer;
-    box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+.hover-list:hover {
+    transform: translateX(5px);
+    background-color: #fff5f5;
 }
 
-/* Responsive tweaks */
+/* Mobile Adjustments */
 @media (max-width: 480px) {
     .card h3 { font-size: 1.1rem !important; }
     .card h6 { font-size: 0.85rem !important; }
-    .list-group-item { font-size: 0.85rem; padding: 0.6rem; }
-    .badge { font-size: 0.7rem; padding: 0.25em 0.4em; }
+    .list-group-item { font-size: 0.8rem; }
+    .badge { font-size: 0.65rem; padding: 0.25em 0.4em; }
 }
 </style>
 

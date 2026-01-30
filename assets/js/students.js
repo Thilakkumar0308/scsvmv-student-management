@@ -1,27 +1,51 @@
 // students.js
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
 
-    // -------------------------------
-    // Initialize DataTable
-    // -------------------------------
+    // ===============================
+    // Student Loading Modal
+    // ===============================
+    let studentLoadingModal;
+    const loadingEl = document.getElementById('studentLoadingModal');
+
+    if (loadingEl) {
+        studentLoadingModal = new bootstrap.Modal(loadingEl, {
+            backdrop: 'static',
+            keyboard: false
+        });
+    }
+
+    function showStudentLoader() {
+        if (studentLoadingModal) studentLoadingModal.show();
+    }
+
+    function hideStudentLoader() {
+        if (studentLoadingModal) studentLoadingModal.hide();
+    }
+
+    // ===============================
+    // DataTable
+    // ===============================
     if (window.jQuery && $.fn.DataTable) {
         $('#studentsTable').DataTable();
     }
 
-    // -------------------------------
-    // Show alert messages
-    // -------------------------------
+    // ===============================
+    // Alerts
+    // ===============================
     function showAlert(message, type = 'success') {
-        const alertContainer = document.createElement('div');
-        alertContainer.className = `alert alert-${type} alert-dismissible fade show`;
-        alertContainer.innerHTML = message + '<button type="button" class="btn-close" data-bs-dismiss="alert"></button>';
-        document.querySelector('.container').prepend(alertContainer);
-        setTimeout(() => alertContainer.remove(), 5000);
+        const alert = document.createElement('div');
+        alert.className = `alert alert-${type} alert-dismissible fade show`;
+        alert.innerHTML = `
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+        document.querySelector('.container')?.prepend(alert);
+        setTimeout(() => alert.remove(), 5000);
     }
 
-    // -------------------------------
+    // ===============================
     // Populate Edit Modal
-    // -------------------------------
+    // ===============================
     function populateEditModal(student) {
         document.getElementById('edit_id').value = student.id || '';
         document.getElementById('edit_student_id').value = student.student_id || '';
@@ -39,142 +63,204 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('edit_status').value = student.status || 'Active';
 
         const preview = document.getElementById('edit_profile_preview');
-        if (preview) {
-            preview.innerHTML = student.profile_picture
-                ? `<img src="${student.profile_picture}" style="width:100px;height:100px;object-fit:cover;border-radius:50%;">`
-                : '<div class="text-muted">No Photo</div>';
-        }
+        preview.innerHTML = student.profile_picture
+            ? `<img src="${student.profile_picture}" style="width:100px;height:100px;object-fit:cover;border-radius:50%;">`
+            : '<div class="text-muted">No Photo</div>';
 
-        const modalEl = document.getElementById('editModal');
-        if (modalEl) new bootstrap.Modal(modalEl).show();
+        new bootstrap.Modal(document.getElementById('editModal')).show();
     }
 
-    // -------------------------------
-    // Handle Edit/Delete buttons
-    // -------------------------------
-    document.addEventListener('click', function(e) {
-        // Edit
+    // ===============================
+    // Edit / Delete Buttons
+    // ===============================
+    document.addEventListener('click', function (e) {
+
+        // EDIT
         if (e.target.closest('.btn-edit')) {
             const btn = e.target.closest('.btn-edit');
-            const student = JSON.parse(btn.getAttribute('data-student') || '{}');
+            const student = JSON.parse(btn.dataset.student || '{}');
             populateEditModal(student);
+            return;
         }
 
-        // Delete
+        // DELETE
         if (e.target.closest('.btn-delete')) {
             const btn = e.target.closest('.btn-delete');
-            const id = btn.getAttribute('data-id');
-            if (id && confirm('Are you sure you want to delete this student?')) {
-                const formData = new FormData();
-                formData.append('action', 'delete');
-                formData.append('id', id);
+            const id = btn.dataset.id;
 
-                fetch(window.location.href, {
-                    method: 'POST',
-                    body: formData
-                })
+            if (!id || !confirm('Are you sure you want to delete this student?')) return;
+
+            const formData = new FormData();
+            formData.append('action', 'delete');
+            formData.append('id', id);
+
+            fetch(window.location.href, { method: 'POST', body: formData })
                 .then(res => res.text())
                 .then(res => {
-                    const parser = new DOMParser();
-                    const doc = parser.parseFromString(res, 'text/html');
+                    const doc = new DOMParser().parseFromString(res, 'text/html');
                     const alertEl = doc.querySelector('.alert');
-                    if (alertEl) showAlert(alertEl.innerHTML, alertEl.classList.contains('alert-danger') ? 'danger' : 'success');
+                    if (alertEl) {
+                        showAlert(
+                            alertEl.innerHTML,
+                            alertEl.classList.contains('alert-danger') ? 'danger' : 'success'
+                        );
+                    }
                     setTimeout(() => location.reload(), 1000);
                 })
-                .catch(err => showAlert('Error deleting student', 'danger'));
-            }
+                .catch(() => showAlert('Error deleting student', 'danger'));
+
+            return;
         }
     });
 
-    // -------------------------------
-    // AJAX Add Student
-    // -------------------------------
+    
+
+    // ===============================
+    // ADD Student
+    // ===============================
     const addForm = document.getElementById('addStudentForm');
     if (addForm) {
-        addForm.addEventListener('submit', function(e) {
+        addForm.addEventListener('submit', function (e) {
             e.preventDefault();
+
+            if (!validateDifferentPhones(addForm)) return;
+
+            showStudentLoader();
+
             const formData = new FormData(addForm);
             formData.append('action', 'add');
 
-            fetch(window.location.href, {
-                method: 'POST',
-                body: formData
-            })
-            .then(res => res.text())
-            .then(res => {
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(res, 'text/html');
-                const alertEl = doc.querySelector('.alert');
-                if (alertEl) showAlert(alertEl.innerHTML, alertEl.classList.contains('alert-danger') ? 'danger' : 'success');
-                addForm.reset();
-                new bootstrap.Modal(document.getElementById('addModal')).hide();
-                setTimeout(() => location.reload(), 1000);
-            })
-            .catch(err => showAlert('Error adding student', 'danger'));
+            fetch(window.location.href, { method: 'POST', body: formData })
+                .then(res => res.text())
+                .then(res => {
+                    hideStudentLoader();
+
+                    const doc = new DOMParser().parseFromString(res, 'text/html');
+                    const alertEl = doc.querySelector('.alert');
+                    if (alertEl) {
+                        showAlert(
+                            alertEl.innerHTML,
+                            alertEl.classList.contains('alert-danger') ? 'danger' : 'success'
+                        );
+                    }
+
+                    addForm.reset();
+                    bootstrap.Modal.getInstance(document.getElementById('addModal')).hide();
+                    setTimeout(() => location.reload(), 1000);
+                })
+                .catch(() => {
+                    hideStudentLoader();
+                    showAlert('Error adding student', 'danger');
+                });
         });
     }
 
-    // -------------------------------
-    // AJAX Edit Student
-    // -------------------------------
+    // ===============================
+    // EDIT Student
+    // ===============================
     const editForm = document.getElementById('editStudentForm');
     if (editForm) {
-        editForm.addEventListener('submit', function(e) {
+        editForm.addEventListener('submit', function (e) {
             e.preventDefault();
+
+            if (!validateDifferentPhones(editForm)) return;
+
+            showStudentLoader();
+
             const formData = new FormData(editForm);
             formData.append('action', 'edit');
 
-            fetch(window.location.href, {
-                method: 'POST',
-                body: formData
-            })
-            .then(res => res.text())
-            .then(res => {
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(res, 'text/html');
-                const alertEl = doc.querySelector('.alert');
-                if (alertEl) showAlert(alertEl.innerHTML, alertEl.classList.contains('alert-danger') ? 'danger' : 'success');
-                new bootstrap.Modal(document.getElementById('editModal')).hide();
-                setTimeout(() => location.reload(), 1000);
-            })
-            .catch(err => showAlert('Error updating student', 'danger'));
+            fetch(window.location.href, { method: 'POST', body: formData })
+                .then(res => res.text())
+                .then(res => {
+                    hideStudentLoader();
+
+                    const doc = new DOMParser().parseFromString(res, 'text/html');
+                    const alertEl = doc.querySelector('.alert');
+                    if (alertEl) {
+                        showAlert(
+                            alertEl.innerHTML,
+                            alertEl.classList.contains('alert-danger') ? 'danger' : 'success'
+                        );
+                    }
+
+                    bootstrap.Modal.getInstance(document.getElementById('editModal')).hide();
+                    setTimeout(() => location.reload(), 1000);
+                })
+                .catch(() => {
+                    hideStudentLoader();
+                    showAlert('Error updating student', 'danger');
+                });
         });
     }
 
-    // -------------------------------
-    // Profile picture preview
-    // -------------------------------
-    function previewImage(input, previewId) {
-        const preview = document.getElementById(previewId);
-        if (!preview || !input.files[0]) return;
+    // ===============================
+    // DOB & Admission Date Limits
+    // ===============================
+    const today = new Date();
+    const todayISO = today.toISOString().split('T')[0];
 
-        const reader = new FileReader();
-        reader.onload = e => preview.innerHTML = `<img src="${e.target.result}" style="width:100px;height:100px;object-fit:cover;border-radius:50%;">`;
-        reader.readAsDataURL(input.files[0]);
-    }
+    const dobMin = new Date(today.getFullYear() - 45, today.getMonth(), today.getDate()).toISOString().split('T')[0];
+    const dobMax = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate()).toISOString().split('T')[0];
 
-    const addPicInput = document.getElementById('add_profile_picture');
-    if (addPicInput) addPicInput.addEventListener('change', () => previewImage(addPicInput, 'add_profile_preview'));
+    document.getElementById('add_dob')?.setAttribute('min', dobMin);
+    document.getElementById('add_dob')?.setAttribute('max', dobMax);
+    document.getElementById('edit_date_of_birth')?.setAttribute('min', dobMin);
+    document.getElementById('edit_date_of_birth')?.setAttribute('max', dobMax);
 
-    const editPicInput = document.getElementById('edit_profile_picture');
-    if (editPicInput) editPicInput.addEventListener('change', () => previewImage(editPicInput, 'edit_profile_preview'));
+    document.getElementById('add_admission')?.setAttribute('min', '1999-01-01');
+    document.getElementById('add_admission')?.setAttribute('max', todayISO);
+    document.getElementById('edit_admission_date')?.setAttribute('min', '1999-01-01');
+    document.getElementById('edit_admission_date')?.setAttribute('max', todayISO);
 
-    // -------------------------------
-    // Redirect to student_info.php on row/card click
-    // -------------------------------
-    function addRedirects() {
-        document.querySelectorAll('.student-row, .student-card').forEach(item => {
-            item.style.cursor = 'pointer';
-            item.addEventListener('click', function(e) {
-                if (e.target.closest('.btn-edit') || e.target.closest('.btn-delete')) return;
-
-                const studentId = this.getAttribute('data-student-id');
-                if(studentId) window.location.href = 'student_info.php?student_id=' + encodeURIComponent(studentId);
-            });
+    // ===============================
+    // ✅ MISSING PART (RESTORED)
+    // Student Row / Card Redirect
+    // ===============================
+    document.querySelectorAll('.student-row').forEach(row => {
+        row.style.cursor = 'pointer';
+        row.addEventListener('click', function (e) {
+            if (e.target.closest('button, a, i')) return;
+            const studentId = this.dataset.studentId;
+            if (studentId) {
+                window.location.href = 'student_info.php?student_id=' + encodeURIComponent(studentId);
+            }
         });
-    }
+    });
 
-    // Call after DOM loaded
-    addRedirects();
-
+    document.querySelectorAll('.student-card').forEach(card => {
+        card.style.cursor = 'pointer';
+        card.addEventListener('click', function (e) {
+            if (e.target.closest('button, a, i')) return;
+            const studentId = this.dataset.studentId;
+            if (studentId) {
+                window.location.href = 'student_info.php?student_id=' + encodeURIComponent(studentId);
+            }
+        });
+    });
 });
+
+// ===============================
+// Phone Validation
+// ===============================
+function validateDifferentPhones(form) {
+    const studentCode = form.querySelector('[name="country_code"]')?.value || '';
+    const parentCode = form.querySelector('[name="parent_country_code"]')?.value || '';
+    const studentPhone = form.querySelector('[name="phone"]');
+    const parentPhone = form.querySelector('[name="parent_phone"]');
+
+    if (!studentPhone || !parentPhone) return true;
+
+    parentPhone.setCustomValidity('');
+
+    if (
+        studentPhone.value &&
+        parentPhone.value &&
+        studentCode + studentPhone.value === parentCode + parentPhone.value
+    ) {
+        parentPhone.setCustomValidity('Student and Parent phone numbers must be different');
+        parentPhone.reportValidity();
+        return false;
+    }
+    return true;
+}

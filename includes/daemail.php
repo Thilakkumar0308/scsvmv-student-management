@@ -1,4 +1,5 @@
 <?php
+
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
@@ -18,7 +19,7 @@ require_once __DIR__ . '/../vendor/autoload.php'; // Composer autoload
  * @param string      $actionDate     Action date (string)
  * @param string      $operation      Operation type: add, edit, delete, resolved
  * @param string|null $recordLink     Optional link to the record (defaults to '/disciplinary.php')
- * @return bool
+ * @return 
  */
 function sendDAEmail(
     $toEmail,

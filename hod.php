@@ -70,7 +70,6 @@ $stmt = $conn->prepare("
     JOIN classes c ON s.class_id = c.id
     WHERE c.department_id = ?
     ORDER BY da.created_at DESC
-    LIMIT 5
 ");
 $stmt->bind_param("i", $hod_department);
 $stmt->execute();
@@ -88,13 +87,38 @@ $stmt = $conn->prepare("
     WHERE c.department_id = ?
     GROUP BY c.id
     ORDER BY c.class_name, c.section
-    LIMIT 5
 ");
 $stmt->bind_param("i", $hod_department);
 $stmt->execute();
 $result = $stmt->get_result();
 while ($row = $result->fetch_assoc()) {
     $total_classes[] = $row;
+}
+
+// Worst Students (Most Disciplinary Actions)
+$worst_students = [];
+$stmt = $conn->prepare("
+    SELECT 
+        s.id,
+        s.first_name,
+        s.last_name,
+        s.student_id,
+        c.class_name,
+        c.section,
+        COUNT(da.id) AS da_count
+    FROM students s
+    JOIN classes c ON s.class_id = c.id
+    LEFT JOIN disciplinary_actions da ON da.student_id = s.id
+    WHERE c.department_id = ?
+    GROUP BY s.id
+    HAVING da_count > 0
+    ORDER BY da_count DESC
+");
+$stmt->bind_param("i", $hod_department);
+$stmt->execute();
+$result = $stmt->get_result();
+while ($row = $result->fetch_assoc()) {
+    $worst_students[] = $row;
 }
 
 include 'includes/header.php';
@@ -150,7 +174,7 @@ include 'includes/header.php';
             <?php if(empty($total_classes)): ?>
                 <p class="text-muted small m-0">No classes found.</p>
             <?php else: ?>
-                <div class="list-group">
+                <div class="list-group class-scroll-box">
                     <?php foreach($total_classes as $class): ?>
                         <a href="students.php?class_id=<?= urlencode($class['id']) ?>"  
                            class="list-group-item list-group-item-action border-0 mb-2 shadow-sm rounded hover-glow flex-column flex-sm-row">
@@ -184,7 +208,7 @@ include 'includes/header.php';
                     <?php if(empty($recent_disciplinary)): ?>
                         <p class="text-muted small m-0">No disciplinary actions.</p>
                     <?php else: ?>
-                        <div class="list-group">
+                        <div class="list-group class-scroll-box">
                             <?php foreach($recent_disciplinary as $disc): ?>
                                 <a href="student_da_record.php?student_id=<?= urlencode($disc['student_id']) ?>" 
                                    class="list-group-item list-group-item-action border-0 mb-2 shadow-sm rounded hover-glow flex-column flex-sm-row">
@@ -202,10 +226,56 @@ include 'includes/header.php';
                         </div>
                     <?php endif; ?>
                 </div>
+                
             </div>
         </div>
-    </div>
+        <!-- Overall Stats -->
+<!-- Worst Students (Most DA Records) -->
+<div class="col-12 col-lg-4">
+    <div class="card shadow-sm border-0 h-100">
+        <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+            <h6 class="mb-0">
+                <i class="fas fa-user-slash me-2"></i> Worst Students (Most DA)
+            </h6>
+        </div>
 
+        <div class="card-body p-2">
+            <?php if(empty($worst_students)): ?>
+                <p class="text-muted small m-0">No disciplinary actions recorded.</p>
+            <?php else: ?>
+                <div class="list-group class-scroll-box">
+                    <?php foreach($worst_students as $ws): ?>
+                        <a href="student_info.php?id=<?= $ws['id'] ?>" 
+                           class="list-group-item list-group-item-action border-0 mb-2 shadow-sm rounded hover-glow">
+
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <strong class="d-block">
+                                        <?= htmlspecialchars($ws['first_name'] . ' ' . $ws['last_name']); ?>
+                                    </strong>
+                                    <span class="text-muted small d-block">
+                                        Reg: <?= htmlspecialchars($ws['student_id']); ?>
+                                    </span>
+                                    <span class="text-muted small d-block">
+                                        <?= htmlspecialchars($ws['class_name'].' '.$ws['section']); ?>
+                                    </span>
+                                </div>
+
+                                <span class="badge bg-danger">
+                                    <?= $ws['da_count'] ?> DA
+                                </span>
+                            </div>
+
+                        </a>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        </div>
+    </div>
+</div>
+
+
+    </div>
 </div>
 <style>
 /* Card Glow & Animation */
@@ -256,6 +326,26 @@ include 'includes/header.php';
     .card h6 { font-size: 0.85rem !important; }
     .list-group-item { font-size: 0.8rem; }
     .badge { font-size: 0.65rem; padding: 0.25em 0.4em; }
+}
+
+/* Scroll Box for Lists */
+.class-scroll-box {
+    max-height: 250px;      /* adjust height */
+    overflow-y: auto;       /* vertical scroll */
+    overflow-x: hidden;     /* hide horizontal scroll */
+    padding-right: 5px;
+}
+
+/* Optional: smooth clean white scrollbar */
+.class-scroll-box::-webkit-scrollbar {
+    width: 6px;
+}
+.class-scroll-box::-webkit-scrollbar-thumb {
+    background: #bbb;
+    border-radius: 3px;
+}
+.class-scroll-box::-webkit-scrollbar-track {
+    background: #f1f1f1;
 }
 </style>
 
